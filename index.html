@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-content">
+<meta name="theme-color" content="#0f1115" id="themecolor">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Theke">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Theke v1.3</title>
+<!--
+  Changelog
+  v1.3  PWA: installierbar (Startbildschirm), läuft offline (Service Worker), App-Icon
+  v1.2  Rückgängig nach NEU, Verlauf (kompakt, antippen = Details, wieder öffnen), Bestellung parken,
+        Optionen: Pitch Black, Bildschirm anlassen, Vibration; Hinweis bei Vorschau ohne JavaScript (iOS)
+  v1.1  Schnellschritt-Button (+5, einstellbar), Zahl antippen öffnet Zahlentastatur, Version im Titel
+  v1.0  Erste Version: Bestellung, Leergut, Ergebnisanzeige, Einstellungen
+-->
+<style>
+:root{
+  --bg:#0f1115; --card:#1a1d24; --line:#2a2f3a; --text:#f2f4f8; --mut:#8b93a3;
+  --neu:#4da3ff; --back:#ffb340; --pay:#2ecc71; --give:#ff5a5f;
+  --field:#0f1218; --foot:#0a0c10; --btn:#2b303b; --tbg:#2b303b;
+}
+/* Pitch Black: echtes Schwarz, nur Umrisse (spart Akku auf OLED) */
+:root.black{--bg:#000; --card:#000; --line:#3d4452; --field:#000; --foot:#000; --btn:#000; --tbg:#000}
+.black .row .m{border:2px solid #4a5160}
+.black .row .p{background:#000;border:2px solid var(--neu);color:var(--neu)}
+.black .row.back .p{background:#000;border-color:var(--back);color:var(--back)}
+.black .row .qk{border-style:dashed}
+.black #toast{border:1px solid #5a6070}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+input,select{user-select:text;-webkit-user-select:text}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  touch-action:manipulation;overscroll-behavior:none}
+#app{height:100vh;height:100dvh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:4px 10px 4px 14px;flex:none}
+header h1{font-size:15px;margin:0;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;font-weight:600}
+header h1 span{font-size:12px;letter-spacing:.04em;text-transform:none;margin-left:6px;opacity:.7}
+header .right{display:flex;align-items:center;gap:2px}
+#hbtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:16px;padding:6px 12px;font-size:13px;font-weight:700}
+#hbtn b{color:var(--text);margin-left:6px}
+#gear{background:none;border:0;color:var(--mut);font-size:26px;padding:4px 10px}
+#parked{display:none;flex:none;gap:6px;overflow-x:auto;padding:2px 8px 6px}
+#parked.has{display:flex}
+.chip{flex:none;display:flex;border:2px solid var(--line);border-radius:22px;overflow:hidden}
+.chip.pay{border-color:var(--pay)} .chip.give{border-color:var(--give)}
+.chip .cb{background:none;border:0;color:var(--text);font-size:15px;font-weight:800;padding:0 10px 0 14px;height:40px;
+  font-variant-numeric:tabular-nums}
+.chip .cx{background:none;border:0;color:var(--mut);width:34px;font-size:15px}
+main{flex:1;overflow-y:auto;padding:0 8px 8px}
+.sec{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  margin:8px 4px 6px;padding-left:8px;border-left:4px solid var(--neu);color:var(--neu)}
+.sec.back{border-color:var(--back);color:var(--back)}
+.row{display:flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:6px 6px 6px 12px;margin-bottom:6px;min-height:64px}
+.row.zero .q{color:var(--mut)}
+.lbl{flex:1;min-width:0}
+.lbl b{display:block;font-size:19px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lbl small{display:block;color:var(--mut);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row button{border:0;border-radius:12px;font-weight:700;color:var(--text);height:54px;padding:0}
+.row .m{width:44px;font-size:34px;background:var(--btn)}
+.row .p{width:58px;font-size:34px;background:var(--neu);color:#06121f}
+.row .qk{width:48px;font-size:19px;background:transparent;border:2px solid var(--neu);color:var(--neu)}
+.row.back .p{background:var(--back);color:#241600}
+.row.back .qk{border-color:var(--back);color:var(--back)}
+.row button:active{transform:scale(.94);filter:brightness(1.25)}
+input.q{width:50px;height:54px;padding:0;text-align:center;font-size:28px;font-weight:800;
+  font-variant-numeric:tabular-nums;font-family:inherit;color:var(--text);
+  background:var(--field);border:1px solid var(--line);border-radius:10px;outline:none}
+input.q:focus{border-color:var(--text)}
+footer{flex:none;display:flex;gap:8px;padding:8px 10px calc(10px + env(safe-area-inset-bottom));
+  background:var(--foot);border-top:1px solid var(--line)}
+#res{flex:1;border-radius:16px;padding:8px 14px;background:var(--card);border:2px solid var(--line)}
+#res.pay{border-color:var(--pay)} #res.give{border-color:var(--give)}
+#res .what{font-size:15px;font-weight:800;letter-spacing:.08em;color:var(--mut)}
+#res.pay .what,#res.pay .big{color:var(--pay)}
+#res.give .what,#res.give .big{color:var(--give)}
+#res .big{font-size:68px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums}
+#res .big small{font-size:20px;font-weight:600;margin-left:6px;color:var(--mut)}
+#res .det{font-size:13px;color:var(--mut);margin-top:2px}
+#side{display:flex;flex-direction:column;gap:6px;width:92px}
+#side button{flex:1;border:2px solid var(--line);background:var(--card);color:var(--text);border-radius:16px;
+  font-size:16px;font-weight:800;padding:0}
+#side button:active{background:#333a47}
+#neu{border-color:var(--neu)!important}
+#toast{display:none;position:fixed;left:10px;right:10px;z-index:20;align-items:center;justify-content:space-between;
+  gap:10px;background:var(--tbg);border-radius:14px;padding:6px 6px 6px 16px;box-shadow:0 4px 18px rgba(0,0,0,.6);
+  font-size:16px;font-weight:600}
+#toast.show{display:flex}
+#toast button{background:none;border:0;color:var(--neu);font-size:16px;font-weight:800;padding:12px 14px;text-transform:uppercase}
+/* Overlays (Einstellungen, Verlauf) */
+.ov{position:fixed;inset:0;background:var(--bg);z-index:10;display:none;flex-direction:column}
+.ov.open{display:flex}
+.ov .top{display:flex;justify-content:space-between;align-items:center;padding:10px 14px}
+.ov .top b{font-size:18px}
+.ov .top button,.sbtn{background:var(--neu);color:#06121f;border:0;border-radius:10px;font-size:16px;font-weight:700;padding:10px 16px}
+.ov .body{flex:1;overflow-y:auto;padding:0 12px 30px}
+.ov h3{margin:16px 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}
+.srow{display:grid;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;margin-bottom:8px}
+.srow.i{grid-template-columns:1fr 64px 1fr 40px}
+.srow.a{grid-template-columns:1fr 64px 40px}
+.srow.c{grid-template-columns:1fr 90px}
+.srow.o{grid-template-columns:1fr 34px;align-items:center;font-size:16px;padding:12px 10px}
+.srow.o input{width:26px;height:26px;accent-color:var(--neu)}
+.srow label{font-size:11px;color:var(--mut);display:block;margin-bottom:2px}
+.srow input,.srow select{width:100%;background:var(--field);color:var(--text);border:1px solid var(--line);
+  border-radius:8px;font-size:17px;padding:9px 8px}
+.srow .del{align-self:end;height:42px;border:0;border-radius:8px;background:#3a2226;color:var(--give);font-size:20px}
+.srow .txt{align-self:center;font-size:15px}
+.sbtn.ghost{background:var(--card);color:var(--text);border:1px solid var(--line);margin-right:8px}
+.hint{color:var(--mut);font-size:13px;margin:6px 2px}
+/* Verlauf */
+.h{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:8px;overflow:hidden}
+.hs{display:flex;align-items:center;gap:10px;padding:10px 12px;min-height:56px}
+.ht{font-size:14px;color:var(--mut);font-variant-numeric:tabular-nums;width:42px;flex:none}
+.hl{flex:1;min-width:0;font-size:15px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+.hv{flex:none;text-align:right;font-weight:800;font-size:18px;min-width:62px;font-variant-numeric:tabular-nums}
+.hv small{display:block;font-size:11px;font-weight:600;color:var(--mut)}
+.hv.pay{color:var(--pay)} .hv.give{color:var(--give)}
+.hd{display:none;border-top:1px solid var(--line);padding:10px 12px;font-size:15px}
+.h.open .hd{display:block}
+.hd .ln{display:flex;justify-content:space-between;gap:8px;padding:3px 0}
+.hd .ln small{color:var(--mut)}
+.hd .sum{border-top:1px dashed var(--line);margin-top:6px;padding-top:6px;color:var(--mut);font-size:13px}
+.hd .sbtn{margin-top:10px;width:100%}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Theke<span id="ver"></span></h1>
+    <div class="right"><button id="hbtn">Verlauf<b id="hc"></b></button><button id="gear" aria-label="Einstellungen">⚙</button></div>
+  </header>
+  <div id="parked"></div>
+  <main id="main"><p class="hint">Die Theke erscheint hier, sobald das Skript läuft. Siehst du nur diesen Text, ist die Datei in einer Vorschau geöffnet (z. B. Mail, Messenger oder Dateien-App). Bitte stattdessen im Browser öffnen oder als Link aufrufen.</p></main>
+  <footer>
+    <div id="res"></div>
+    <div id="side"><button id="neu">NEU Gast</button><button id="park">PARKEN</button></div>
+  </footer>
+</div>
+
+<div id="toast"><span id="tmsg"></span><button id="tact"></button></div>
+
+<div id="set" class="ov">
+  <div class="top"><b>Einstellungen</b><button id="close">Fertig</button></div>
+  <div class="body" id="setbody"></div>
+</div>
+
+<div id="hist" class="ov">
+  <div class="top"><b>Letzte Bestellungen</b><button id="hclose">Fertig</button></div>
+  <div class="body" id="histbody"></div>
+</div>
+
+<script>
+const VERSION = 'v1.3';
+const KEY = 'theke-config-v1';
+const SKEY = 'theke-state-v1';
+const DEFAULT = {
+  schritt: 5,
+  opt: {wake:true, vib:true, black:false},
+  arten: [
+    {id:'glas',    name:'Glas',   wert:1},
+    {id:'traeger', name:'Träger', wert:10}
+  ],
+  items: [
+    {id:'bier', name:'Bier',      preis:2, art:'glas'},
+    {id:'long', name:'Longdrink', preis:3, art:'glas'},
+    {id:'shot', name:'Shot',      preis:1, art:''},
+    {id:'trg',  name:'Träger',    preis:0, art:'traeger'}
+  ]
+};
+const clone = o => JSON.parse(JSON.stringify(o));
+
+let cfg;
+try { cfg = JSON.parse(localStorage.getItem(KEY)) } catch(e){}
+if(!cfg || !cfg.items || !cfg.arten) cfg = clone(DEFAULT);
+if(!(cfg.schritt >= 1)) cfg.schritt = DEFAULT.schritt;
+cfg.opt = Object.assign({}, DEFAULT.opt, cfg.opt || {});
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(cfg)) }catch(e){} }
+
+/* Aktueller Stand, geparkte Bestellungen, Verlauf (überlebt Neuladen) */
+let order = {}, back = {}, parked = [], hist = [];
+try {
+  const s = JSON.parse(localStorage.getItem(SKEY));
+  if(s){ order = s.order||{}; back = s.back||{}; parked = s.parked||[]; hist = s.hist||[]; }
+} catch(e){}
+function saveState(){ try{ localStorage.setItem(SKEY, JSON.stringify({order, back, parked, hist})) }catch(e){} }
+
+document.title = 'Theke ' + VERSION;
+document.getElementById('ver').textContent = VERSION;
+
+const $ = s => document.querySelector(s);
+const uid = () => 'x' + Math.random().toString(36).slice(2,8) + Date.now().toString(36).slice(-3);
+const num = v => { const n = parseFloat(String(v).replace(',','.')); return isNaN(n)?0:n };
+const fmt = n => (Math.round(n*100)/100).toString().replace('.',',');
+const art = id => cfg.arten.find(a => a.id === id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const store = k => k === 'o' ? order : back;
+const timeStr = t => new Date(t).toLocaleTimeString('de-DE', {hour:'2-digit', minute:'2-digit'});
+const buzz = p => { if(cfg.opt.vib && navigator.vibrate) navigator.vibrate(p); };
+
+function applyTheme(){
+  document.documentElement.classList.toggle('black', !!cfg.opt.black);
+  $('#themecolor').setAttribute('content', cfg.opt.black ? '#000000' : '#0f1115');
+}
+
+/* ---------- Rechnen ---------- */
+function calc(){
+  let drinks=0, pfandNeu=0, rueck=0;
+  cfg.items.forEach(i => {
+    const q = order[i.id]||0;
+    drinks += q * i.preis;
+    const a = art(i.art); if(a) pfandNeu += q * a.wert;
+  });
+  cfg.arten.forEach(a => rueck += (back[a.id]||0) * a.wert);
+  return {drinks, pfandNeu, rueck, total: drinks + pfandNeu - rueck};
+}
+const isEmpty = () => !cfg.items.some(i => (order[i.id]||0) > 0) && !cfg.arten.some(a => (back[a.id]||0) > 0);
+
+/* Momentaufnahme der aktuellen Bestellung (mit Namen/Preisen von damals) */
+function snap(){
+  const c = calc(), o = [], b = [];
+  cfg.items.forEach(i => {
+    const q = order[i.id]||0;
+    if(q > 0){ const a = art(i.art); o.push({id:i.id, n:i.name, q, p:i.preis, f:a?a.wert:0}); }
+  });
+  cfg.arten.forEach(a => {
+    const q = back[a.id]||0;
+    if(q > 0) b.push({id:a.id, n:a.name, q, w:a.wert});
+  });
+  return {id:uid(), t:Date.now(), o, b, drinks:c.drinks, pfandNeu:c.pfandNeu, rueck:c.rueck, total:c.total};
+}
+function load(e){
+  order = {}; back = {}; let skipped = 0;
+  e.o.forEach(l => { if(cfg.items.some(i => i.id===l.id)) order[l.id] = l.q; else skipped++; });
+  e.b.forEach(l => { if(cfg.arten.some(a => a.id===l.id)) back[l.id] = l.q; else skipped++; });
+  return skipped;
+}
+
+/* ---------- Anzeige ---------- */
+function rowHtml(kind, id, name, sub, q){
+  const d = `data-k="${kind}" data-id="${id}"`;
+  return `<div class="row ${kind==='b'?'back':''} ${q?'':'zero'}">
+    <div class="lbl"><b>${esc(name)}</b><small>${esc(sub)}</small></div>
+    <button class="m" ${d} data-d="-1" aria-label="weniger">−</button>
+    <input class="q" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3"
+      enterkeyhint="done" autocomplete="off" ${d} value="${q}" aria-label="Menge">
+    <button class="p" ${d} data-d="1" aria-label="mehr">+</button>
+    <button class="qk" ${d} data-d="${cfg.schritt}" aria-label="plus ${cfg.schritt}">+${cfg.schritt}</button>
+  </div>`;
+}
+
+function renderMain(){
+  let h = '<div class="sec">Neue Bestellung</div>';
+  cfg.items.forEach(i => {
+    const a = art(i.art);
+    let sub = fmt(i.preis) + ' €';
+    if(a) sub += ' · +' + fmt(a.wert) + ' € Pfand';
+    h += rowHtml('o', i.id, i.name, sub, order[i.id]||0);
+  });
+  h += '<div class="sec back">Leergut zurück</div>';
+  cfg.arten.forEach(a => {
+    h += rowHtml('b', a.id, a.name, fmt(a.wert) + ' € je Stück', back[a.id]||0);
+  });
+  $('#main').innerHTML = h;
+}
+
+function renderResult(){
+  const c = calc();
+  const res = $('#res');
+  let cls='', what='', val=Math.abs(c.total);
+  if(c.total>0){cls='pay';what='GAST ZAHLT'}
+  else if(c.total<0){cls='give';what='DU GIBST ZURÜCK'}
+  else {what='NICHTS ZU ZAHLEN'}
+  res.className = cls;
+  res.innerHTML = `<div class="what">${what}</div>
+    <div class="big">${fmt(val)}<small>Marken</small></div>
+    <div class="det">Getränke ${fmt(c.drinks)} · Pfand neu ${fmt(c.pfandNeu)} · Rückgabe −${fmt(c.rueck)}</div>`;
+}
+
+function chipAmount(t){ return t>0 ? fmt(t) : t<0 ? '−'+fmt(-t) : '0'; }
+function renderParked(){
+  const p = $('#parked');
+  p.className = parked.length ? 'has' : '';
+  p.innerHTML = parked.map(e => {
+    const cls = e.total>0 ? 'pay' : e.total<0 ? 'give' : '';
+    return `<div class="chip ${cls}">
+      <button class="cb" data-resume="${e.id}">⏸ ${timeStr(e.t)} · ${chipAmount(e.total)}</button>
+      <button class="cx" data-drop="${e.id}" aria-label="verwerfen">✕</button></div>`;
+  }).join('');
+}
+
+function render(){
+  renderMain(); renderResult(); renderParked();
+  $('#hc').textContent = hist.length ? hist.length : '';
+}
+
+/* ---------- Toast ---------- */
+let tt;
+function hideToast(){ $('#toast').classList.remove('show'); }
+function toast(msg, label, fn){
+  const t = $('#toast'), b = $('#tact');
+  $('#tmsg').textContent = msg;
+  if(label){ b.style.display = ''; b.textContent = label; b.onclick = () => { hideToast(); fn(); }; }
+  else { b.style.display = 'none'; b.onclick = null; }
+  t.style.bottom = ($('footer').offsetHeight + 10) + 'px';
+  t.classList.add('show');
+  clearTimeout(tt); tt = setTimeout(hideToast, 6000);
+}
+
+/* ---------- Aktionen: Fertig, Parken, Wieder öffnen ---------- */
+function finish(){
+  if(isEmpty()){ buzz(10); return; }
+  const e = snap();
+  hist.unshift(e); if(hist.length > 30) hist.length = 30;
+  order = {}; back = {};
+  saveState(); render(); buzz([15,40,15]);
+  toast('Gespeichert', 'Rückgängig', () => reopen(e.id));
+}
+function reopen(id){
+  const i = hist.findIndex(x => x.id === id); if(i < 0) return;
+  const e = hist.splice(i,1)[0];
+  const hadCurrent = !isEmpty();
+  if(hadCurrent) parked.push(snap());
+  const sk = load(e);
+  saveState(); render();
+  const msgs = [];
+  if(hadCurrent) msgs.push('Aktuelle Bestellung geparkt');
+  if(sk) msgs.push(sk + ' Artikel gibt es nicht mehr');
+  if(msgs.length) toast(msgs.join(' · '));
+}
+function park(){
+  if(isEmpty()){ buzz(10); return; }
+  const e = snap();
+  parked.push(e);
+  order = {}; back = {};
+  saveState(); render(); buzz(15);
+  toast('Geparkt', 'Rückgängig', () => resume(e.id));
+}
+function resume(id){
+  const i = parked.findIndex(x => x.id === id); if(i < 0) return;
+  const e = parked.splice(i,1)[0];
+  if(!isEmpty()) parked.splice(i, 0, snap());   // aktuelle Bestellung tauscht den Platz
+  const sk = load(e);
+  saveState(); render(); buzz(10);
+  if(sk) toast(sk + ' Artikel gibt es nicht mehr');
+}
+function drop(id){
+  const i = parked.findIndex(x => x.id === id); if(i < 0) return;
+  if(!confirm('Geparkte Bestellung verwerfen?')) return;
+  parked.splice(i,1); saveState(); render();
+}
+
+$('#neu').addEventListener('click', () => {
+  if(document.activeElement) document.activeElement.blur();
+  finish();
+});
+$('#park').addEventListener('click', () => {
+  if(document.activeElement) document.activeElement.blur();
+  park();
+});
+$('#parked').addEventListener('click', e => {
+  const r = e.target.closest('[data-resume]'); if(r){ resume(r.dataset.resume); return; }
+  const d = e.target.closest('[data-drop]'); if(d) drop(d.dataset.drop);
+});
+
+/* ---------- Buttons und Zahleneingabe ---------- */
+$('#main').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  const s = store(b.dataset.k), id = b.dataset.id, d = +b.dataset.d;
+  s[id] = Math.max(0, (s[id]||0) + d);
+  buzz(8);
+  const sc = $('#main').scrollTop;
+  saveState(); render();
+  $('#main').scrollTop = sc;
+});
+$('#main').addEventListener('focusin', e => {
+  const t = e.target;
+  if(t.classList.contains('q')) setTimeout(() => t.select(), 0);
+});
+$('#main').addEventListener('input', e => {
+  const t = e.target; if(!t.classList.contains('q')) return;
+  const clean = t.value.replace(/\D/g,'');
+  if(clean !== t.value) t.value = clean;
+  store(t.dataset.k)[t.dataset.id] = parseInt(clean,10) || 0;
+  saveState(); renderResult();   // nur Ergebnis neu, damit die Tastatur offen bleibt
+});
+$('#main').addEventListener('focusout', e => {
+  const t = e.target; if(!t.classList.contains('q')) return;
+  const v = store(t.dataset.k)[t.dataset.id] || 0;
+  t.value = v;      // in place normalisieren, kein Neuaufbau (sonst geht der nächste Tap verloren)
+  t.closest('.row').classList.toggle('zero', !v);
+});
+$('#main').addEventListener('keydown', e => {
+  if(e.key === 'Enter' && e.target.classList.contains('q')) e.target.blur();
+});
+
+/* ---------- Verlauf ---------- */
+function summary(e){
+  const p = e.o.map(l => `${l.q} ${l.n}`).concat(e.b.map(l => `↩ ${l.q} ${l.n}`));
+  return p.length ? p.join(' · ') : '—';
+}
+function renderHist(){
+  let h = '';
+  if(!hist.length) h = '<p class="hint">Noch keine abgeschlossenen Bestellungen. Tippe auf einen Eintrag für alle Details.</p>';
+  hist.forEach(e => {
+    const cls = e.total>0 ? 'pay' : e.total<0 ? 'give' : '';
+    const lab = e.total>0 ? 'zahlt' : e.total<0 ? 'zurück' : '';
+    let d = '';
+    e.o.forEach(l => {
+      d += `<div class="ln"><span>${l.q}× ${esc(l.n)} <small>${fmt(l.p)} €${l.f ? ' + '+fmt(l.f)+' € Pfand' : ''}</small></span><b>${fmt(l.q*(l.p+l.f))}</b></div>`;
+    });
+    e.b.forEach(l => {
+      d += `<div class="ln"><span>↩ ${l.q}× ${esc(l.n)} <small>${fmt(l.w)} € je</small></span><b>−${fmt(l.q*l.w)}</b></div>`;
+    });
+    d += `<div class="sum">Getränke ${fmt(e.drinks)} · Pfand neu ${fmt(e.pfandNeu)} · Rückgabe −${fmt(e.rueck)}</div>`;
+    d += `<button class="sbtn" data-reopen="${e.id}">Wieder öffnen</button>`;
+    h += `<div class="h"><div class="hs"><div class="ht">${timeStr(e.t)}</div>
+      <div class="hl">${esc(summary(e))}</div>
+      <div class="hv ${cls}">${fmt(Math.abs(e.total))}${lab ? '<small>'+lab+'</small>' : ''}</div></div>
+      <div class="hd">${d}</div></div>`;
+  });
+  if(hist.length) h += '<button class="sbtn ghost" id="hclear">Verlauf leeren</button>';
+  $('#histbody').innerHTML = h;
+}
+$('#hbtn').addEventListener('click', () => { renderHist(); $('#hist').classList.add('open'); });
+$('#hclose').addEventListener('click', () => $('#hist').classList.remove('open'));
+$('#histbody').addEventListener('click', e => {
+  const t = e.target;
+  const re = t.closest('[data-reopen]');
+  if(re){ reopen(re.dataset.reopen); $('#hist').classList.remove('open'); return; }
+  if(t.id === 'hclear'){
+    if(confirm('Verlauf leeren?')){ hist = []; saveState(); renderHist(); render(); }
+    return;
+  }
+  const hs = t.closest('.hs'); if(hs) hs.parentElement.classList.toggle('open');
+});
+
+/* ---------- Einstellungen ---------- */
+function renderSettings(){
+  let h = '<h3>Optionen</h3>';
+  [['black','Pitch Black (spart Akku bei OLED)'],['wake','Bildschirm anlassen'],['vib','Vibration']].forEach(([k,l]) => {
+    h += `<label class="srow o"><span>${l}</span><input type="checkbox" data-s="opt" data-f="${k}" ${cfg.opt[k]?'checked':''}></label>`;
+  });
+
+  h += '<h3>Schnellschritt</h3>';
+  h += `<div class="srow c">
+      <div class="txt">Der Button neben + addiert diese Zahl auf einmal</div>
+      <div><label>Schritt</label><input inputmode="numeric" data-s="cfg" data-f="schritt" value="${cfg.schritt}"></div></div>`;
+
+  h += '<h3>Pfandarten</h3>';
+  cfg.arten.forEach((a,idx) => {
+    h += `<div class="srow a">
+      <div><label>Name</label><input data-s="art" data-i="${idx}" data-f="name" value="${esc(a.name)}"></div>
+      <div><label>Pfand €</label><input inputmode="decimal" data-s="art" data-i="${idx}" data-f="wert" value="${fmt(a.wert)}"></div>
+      <button class="del" data-del="art" data-i="${idx}">✕</button></div>`;
+  });
+  h += '<button class="sbtn ghost" id="addArt">+ Pfandart</button>';
+
+  h += '<h3>Artikel</h3>';
+  cfg.items.forEach((i,idx) => {
+    const opts = '<option value="">kein Pfand</option>' +
+      cfg.arten.map(a => `<option value="${a.id}" ${a.id===i.art?'selected':''}>${esc(a.name)}</option>`).join('');
+    h += `<div class="srow i">
+      <div><label>Name</label><input data-s="item" data-i="${idx}" data-f="name" value="${esc(i.name)}"></div>
+      <div><label>Preis €</label><input inputmode="decimal" data-s="item" data-i="${idx}" data-f="preis" value="${fmt(i.preis)}"></div>
+      <div><label>Pfand</label><select data-s="item" data-i="${idx}" data-f="art">${opts}</select></div>
+      <button class="del" data-del="item" data-i="${idx}">✕</button></div>`;
+  });
+  h += '<button class="sbtn ghost" id="addItem">+ Artikel</button>';
+  h += '<p class="hint">Änderungen werden sofort gespeichert. Pfand wird beim Verkauf automatisch dazugerechnet, die Rückgabe läuft über die Pfandarten.</p>';
+  h += '<button class="sbtn ghost" id="reset">Auf Standard zurücksetzen</button>';
+  h += `<p class="hint">Theke ${VERSION}</p>`;
+  $('#setbody').innerHTML = h;
+}
+
+$('#setbody').addEventListener('input', e => {
+  const t = e.target, s = t.dataset.s; if(!s) return;
+  if(s === 'opt'){ cfg.opt[t.dataset.f] = t.checked; save(); applyTheme(); applyWake(); return; }
+  if(s === 'cfg'){
+    const n = Math.round(num(t.value));
+    cfg.schritt = n >= 1 ? n : DEFAULT.schritt;
+    save(); return;
+  }
+  const list = s==='art' ? cfg.arten : cfg.items;
+  const o = list[+t.dataset.i], f = t.dataset.f;
+  o[f] = (f==='preis'||f==='wert') ? num(t.value) : t.value;
+  save();
+});
+$('#setbody').addEventListener('click', e => {
+  const t = e.target;
+  if(t.dataset.del){
+    const i = +t.dataset.i;
+    if(t.dataset.del==='art'){
+      const id = cfg.arten[i].id;
+      cfg.arten.splice(i,1);
+      cfg.items.forEach(x => { if(x.art===id) x.art=''; });
+      delete back[id];
+    } else {
+      delete order[cfg.items[i].id];
+      cfg.items.splice(i,1);
+    }
+    save(); saveState(); renderSettings();
+  } else if(t.id==='addArt'){
+    cfg.arten.push({id:uid(), name:'Neu', wert:1}); save(); renderSettings();
+  } else if(t.id==='addItem'){
+    cfg.items.push({id:uid(), name:'Neu', preis:1, art:''}); save(); renderSettings();
+  } else if(t.id==='reset'){
+    if(confirm('Alle Einstellungen auf Standard zurücksetzen?')){
+      cfg = clone(DEFAULT); order={}; back={}; save(); saveState(); applyTheme(); applyWake(); renderSettings();
+    }
+  }
+});
+
+$('#gear').addEventListener('click', () => { renderSettings(); $('#set').classList.add('open'); });
+$('#close').addEventListener('click', () => { $('#set').classList.remove('open'); render(); });
+
+/* Bildschirm anlassen (abschaltbar) */
+let lock = null;
+async function applyWake(){
+  try{
+    if(!cfg.opt.wake){ if(lock){ await lock.release(); lock = null; } return; }
+    if('wakeLock' in navigator && !lock){
+      lock = await navigator.wakeLock.request('screen');
+      lock.addEventListener('release', () => { lock = null; });
+    }
+  }catch(e){}
+}
+document.addEventListener('touchstart', applyWake, {once:true});
+document.addEventListener('visibilitychange', () => { if(document.visibilityState==='visible') applyWake(); });
+
+applyTheme();
+render();
+
+/* Offline-Betrieb: nur auf http(s), nicht bei lokaler Datei */
+if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+</script>
+</body>
+</html>
