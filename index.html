@@ -11,9 +11,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Theke">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<title>Theke v1.3</title>
+<title>Theke v1.4</title>
 <!--
   Changelog
+  v1.4  Leeren (verwirft aktuelle Bestellung, mit Rückgängig), − halten = Zeile auf 0, kräftigere Vibration + Test,
+        Hinweis "Neue Version bereit"
   v1.3  PWA: installierbar (Startbildschirm), läuft offline (Service Worker), App-Icon
   v1.2  Rückgängig nach NEU, Verlauf (kompakt, antippen = Details, wieder öffnen), Bestellung parken,
         Optionen: Pitch Black, Bildschirm anlassen, Vibration; Hinweis bei Vorschau ohne JavaScript (iOS)
@@ -58,6 +60,10 @@ main{flex:1;overflow-y:auto;padding:0 8px 8px}
 .sec{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
   margin:8px 4px 6px;padding-left:8px;border-left:4px solid var(--neu);color:var(--neu)}
 .sec.back{border-color:var(--back);color:var(--back)}
+.sech{display:flex;align-items:center;justify-content:space-between;margin:8px 4px 6px}
+.sech .sec{margin:0}
+#clear{background:none;border:1px solid var(--line);color:var(--mut);border-radius:14px;padding:5px 12px;font-size:13px;font-weight:700}
+#clear:active{background:#333a47}
 .row{display:flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--line);
   border-radius:14px;padding:6px 6px 6px 12px;margin-bottom:6px;min-height:64px}
 .row.zero .q{color:var(--mut)}
@@ -160,7 +166,7 @@ footer{flex:none;display:flex;gap:8px;padding:8px 10px calc(10px + env(safe-area
 </div>
 
 <script>
-const VERSION = 'v1.3';
+const VERSION = 'v1.4';
 const KEY = 'theke-config-v1';
 const SKEY = 'theke-state-v1';
 const DEFAULT = {
@@ -259,7 +265,7 @@ function rowHtml(kind, id, name, sub, q){
 }
 
 function renderMain(){
-  let h = '<div class="sec">Neue Bestellung</div>';
+  let h = '<div class="sech"><div class="sec">Neue Bestellung</div><button id="clear">Leeren</button></div>';
   cfg.items.forEach(i => {
     const a = art(i.art);
     let sub = fmt(i.preis) + ' €';
@@ -306,23 +312,23 @@ function render(){
 /* ---------- Toast ---------- */
 let tt;
 function hideToast(){ $('#toast').classList.remove('show'); }
-function toast(msg, label, fn){
+function toast(msg, label, fn, ms){
   const t = $('#toast'), b = $('#tact');
   $('#tmsg').textContent = msg;
   if(label){ b.style.display = ''; b.textContent = label; b.onclick = () => { hideToast(); fn(); }; }
   else { b.style.display = 'none'; b.onclick = null; }
   t.style.bottom = ($('footer').offsetHeight + 10) + 'px';
   t.classList.add('show');
-  clearTimeout(tt); tt = setTimeout(hideToast, 6000);
+  clearTimeout(tt); tt = setTimeout(hideToast, ms || 6000);
 }
 
 /* ---------- Aktionen: Fertig, Parken, Wieder öffnen ---------- */
 function finish(){
-  if(isEmpty()){ buzz(10); return; }
+  if(isEmpty()){ buzz(20); return; }
   const e = snap();
   hist.unshift(e); if(hist.length > 30) hist.length = 30;
   order = {}; back = {};
-  saveState(); render(); buzz([15,40,15]);
+  saveState(); render(); buzz([30,50,30]);
   toast('Gespeichert', 'Rückgängig', () => reopen(e.id));
 }
 function reopen(id){
@@ -338,11 +344,11 @@ function reopen(id){
   if(msgs.length) toast(msgs.join(' · '));
 }
 function park(){
-  if(isEmpty()){ buzz(10); return; }
+  if(isEmpty()){ buzz(20); return; }
   const e = snap();
   parked.push(e);
   order = {}; back = {};
-  saveState(); render(); buzz(15);
+  saveState(); render(); buzz(30);
   toast('Geparkt', 'Rückgängig', () => resume(e.id));
 }
 function resume(id){
@@ -350,7 +356,7 @@ function resume(id){
   const e = parked.splice(i,1)[0];
   if(!isEmpty()) parked.splice(i, 0, snap());   // aktuelle Bestellung tauscht den Platz
   const sk = load(e);
-  saveState(); render(); buzz(10);
+  saveState(); render(); buzz(20);
   if(sk) toast(sk + ' Artikel gibt es nicht mehr');
 }
 function drop(id){
@@ -372,12 +378,49 @@ $('#parked').addEventListener('click', e => {
   const d = e.target.closest('[data-drop]'); if(d) drop(d.dataset.drop);
 });
 
+/* ---------- Leeren (verwirft die aktuelle Bestellung, ohne Verlauf) ---------- */
+function clearOrder(){
+  if(isEmpty()){ buzz(20); return; }
+  const e = snap();
+  order = {}; back = {};
+  saveState(); render(); buzz(30);
+  toast('Verworfen', 'Rückgängig', () => {
+    const had = !isEmpty();
+    if(had) parked.push(snap());
+    load(e); saveState(); render();
+    if(had) toast('Aktuelle Bestellung geparkt');
+  });
+}
+
+/* ---------- − lange drücken = Zeile auf 0 ---------- */
+let lpTimer = null, lpFired = false;
+function lpCancel(){ clearTimeout(lpTimer); lpTimer = null; }
+$('#main').addEventListener('pointerdown', e => {
+  lpFired = false; lpCancel();
+  const b = e.target.closest('button.m'); if(!b) return;
+  lpTimer = setTimeout(() => {
+    lpTimer = null;
+    const s = store(b.dataset.k), id = b.dataset.id;
+    if(!(s[id] > 0)) return;
+    s[id] = 0; lpFired = true;
+    buzz(60);
+    const sc = $('#main').scrollTop;
+    saveState(); render(); $('#main').scrollTop = sc;
+  }, 450);
+});
+['pointerup','pointercancel','pointerout'].forEach(ev => $('#main').addEventListener(ev, lpCancel));
+['pointerup','pointercancel'].forEach(ev => $('#main').addEventListener(ev, () => { setTimeout(() => { lpFired = false; }, 300); }));   // Sperr-Flag nie hängen lassen
+$('#main').addEventListener('contextmenu', e => { if(e.target.closest('button')) e.preventDefault(); });
+
 /* ---------- Buttons und Zahleneingabe ---------- */
 $('#main').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
+  if(b.id === 'clear'){ clearOrder(); return; }
+  if(lpFired){ lpFired = false; return; }   // Klick nach langem Drücken ignorieren
+  if(!b.dataset.k) return;
   const s = store(b.dataset.k), id = b.dataset.id, d = +b.dataset.d;
   s[id] = Math.max(0, (s[id]||0) + d);
-  buzz(8);
+  buzz(25);
   const sc = $('#main').scrollTop;
   saveState(); render();
   $('#main').scrollTop = sc;
@@ -451,6 +494,8 @@ function renderSettings(){
     h += `<label class="srow o"><span>${l}</span><input type="checkbox" data-s="opt" data-f="${k}" ${cfg.opt[k]?'checked':''}></label>`;
   });
 
+  h += '<button class="sbtn ghost" id="vtest">Vibration testen</button><p class="hint" id="vres"></p>';
+  h += '<p class="hint">Tipp: − gedrückt halten setzt die Zeile auf 0. „Leeren“ über der Liste verwirft die ganze aktuelle Bestellung.</p>';
   h += '<h3>Schnellschritt</h3>';
   h += `<div class="srow c">
       <div class="txt">Der Button neben + addiert diese Zahl auf einmal</div>
@@ -513,6 +558,15 @@ $('#setbody').addEventListener('click', e => {
     cfg.arten.push({id:uid(), name:'Neu', wert:1}); save(); renderSettings();
   } else if(t.id==='addItem'){
     cfg.items.push({id:uid(), name:'Neu', preis:1, art:''}); save(); renderSettings();
+  } else if(t.id==='vtest'){
+    const r = $('#vres');
+    if(!navigator.vibrate){ r.textContent = 'Dieser Browser unterstützt keine Web-Vibration (z. B. iPhone).'; }
+    else {
+      const ok = navigator.vibrate(250);
+      r.textContent = ok
+        ? 'Signal gesendet (250 ms). Spürst du nichts, blockiert das System die Vibration: Einstellungen → Töne und Vibration → Vibrationsstärke prüfen, Energiesparmodus ausschalten.'
+        : 'Der Browser hat die Vibration abgelehnt.';
+    }
   } else if(t.id==='reset'){
     if(confirm('Alle Einstellungen auf Standard zurücksetzen?')){
       cfg = clone(DEFAULT); order={}; back={}; save(); saveState(); applyTheme(); applyWake(); renderSettings();
@@ -542,6 +596,10 @@ render();
 
 /* Offline-Betrieb: nur auf http(s), nicht bei lokaler Datei */
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if(hadController) toast('Neue Version bereit', 'Neu laden', () => location.reload(), 20000);
+  });
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
 }
 </script>
